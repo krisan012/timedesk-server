@@ -84,3 +84,7 @@ tungstenite = { git = "https://github.com/rustdesk-org/tungstenite-rs", rev = "e
 # The static musl build has no system OpenSSL; hbb_common's native-tls needs one.
 [target.'cfg(target_env = "musl")'.dependencies]
 openssl = { version = "0.10", features = ["vendored"] }
+
+# hbb_common is also a build-dependency, built for the cross container's host.
+[target.'cfg(target_os = "linux")'.build-dependencies]
+openssl = { version = "0.10", features = ["vendored"] }
