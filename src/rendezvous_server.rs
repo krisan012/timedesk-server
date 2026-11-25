@@ -648,8 +648,8 @@ impl RendezvousServer {
                     msg_out.set_test_nat_response(res);
                     Self::send_to_sink(sink, msg_out).await;
                 }
-                Some(rendezvous_message::Union::RegisterPk(_)) => {
-                    let res = register_pk_response::Result::NOT_SUPPORT;
+                Some(rendezvous_message::Union::RegisterPk(rk)) => {
+                    let res = self.handle_change_id(rk, addr).await;
                     let mut msg_out = RendezvousMessage::new();
                     msg_out.set_register_pk_response(RegisterPkResponse {
                         result: res.into(),
@@ -973,6 +973,43 @@ impl RendezvousServer {
             },
         ))?;
         Ok(())
+    }
+
+    // The client's "Change ID": rename old_id to id. The machine uuid must match
+    // the one old_id registered with, the same proof normal registration trusts.
+    async fn handle_change_id(
+        &mut self,
+        rk: RegisterPk,
+        addr: SocketAddr,
+    ) -> register_pk_response::Result {
+        use register_pk_response::Result::*;
+        if rk.old_id.is_empty() || rk.uuid.is_empty() {
+            return NOT_SUPPORT;
+        }
+        if !hbb_common::is_valid_custom_id(&rk.id) {
+            return INVALID_ID_FORMAT;
+        }
+        if !self.check_ip_blocker(&addr.ip().to_string(), &rk.id).await {
+            return TOO_FREQUENT;
+        }
+        let Some(old) = self.pm.get(&rk.old_id).await else {
+            return UUID_MISMATCH;
+        };
+        if old.read().await.uuid != rk.uuid {
+            log::warn!("Change id {} -> {} refused: uuid mismatch", rk.old_id, rk.id);
+            return UUID_MISMATCH;
+        }
+        if let Some(existing) = self.pm.get(&rk.id).await {
+            let uuid = existing.read().await.uuid.clone();
+            if uuid == rk.uuid {
+                return OK;
+            }
+            if !uuid.is_empty() {
+                return ID_EXISTS;
+            }
+        }
+        log::info!("Change id {} -> {}", rk.old_id, rk.id);
+        self.pm.rename(&rk.old_id, &rk.id, old).await
     }
 
     async fn check_ip_blocker(&self, ip: &str, id: &str) -> bool {

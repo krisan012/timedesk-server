@@ -1,0 +1,41 @@
+name: timedesk
+
+# Builds static x86_64 hbbs/hbbr and publishes them on the "timedesk-latest"
+# release, which the TimeDesk droplet downloads.
+on:
+  workflow_dispatch:
+  push:
+    branches: [master]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cross
+
+      - name: Build
+        run: cross build --release --all-features --target x86_64-unknown-linux-musl --bin hbbs --bin hbbr
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd target/x86_64-unknown-linux-musl/release
+          sha256sum hbbs hbbr > SHA256SUMS
+          gh release delete timedesk-latest --cleanup-tag --yes -R "$GITHUB_REPOSITORY" || true
+          gh release create timedesk-latest hbbs hbbr SHA256SUMS -R "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" --title "TimeDesk server (latest)" \
+            --notes "Built from $GITHUB_SHA"

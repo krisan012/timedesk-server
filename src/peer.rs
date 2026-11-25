@@ -171,6 +171,33 @@ impl PeerMap {
         tmp
     }
 
+    pub(crate) async fn rename(
+        &self,
+        old_id: &str,
+        new_id: &str,
+        peer: LockPeer,
+    ) -> register_pk_response::Result {
+        let (guid, pk, info) = {
+            let r = peer.read().await;
+            (
+                r.guid.clone(),
+                r.pk.clone(),
+                serde_json::to_string(&r.info).unwrap_or_default(),
+            )
+        };
+        if guid.is_empty() {
+            return register_pk_response::Result::SERVER_ERROR;
+        }
+        if let Err(err) = self.db.update_pk(&guid, new_id, &pk, &info).await {
+            log::error!("db rename {} -> {} failed: {}", old_id, new_id, err);
+            return register_pk_response::Result::SERVER_ERROR;
+        }
+        let mut map = self.map.write().await;
+        map.remove(old_id);
+        map.insert(new_id.to_owned(), peer);
+        register_pk_response::Result::OK
+    }
+
     #[inline]
     pub(crate) async fn get_in_memory(&self, id: &str) -> Option<LockPeer> {
         self.map.read().await.get(id).cloned()
